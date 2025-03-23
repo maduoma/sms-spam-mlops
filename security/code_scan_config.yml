@@ -1,0 +1,10 @@
+name: "SMS Spam Classifier CodeQL Config"
+queries:
+  - uses: security-and-quality
+paths:
+  - scripts/
+  - lambda/
+  - pipelines/
+paths-ignore:
+  - data/
+  - terraform/
