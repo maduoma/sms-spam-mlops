@@ -1,46 +1,74 @@
-name: 📦 MLOps Pipeline
+name: CI/CD - SageMaker Spam Classifier - MLOps Pipeline
 
 on:
   push:
-    branches: [main]
+    branches:
+      - main
   pull_request:
-    branches: [main]
+
+env:
+  AWS_REGION: us-east-1
+  BUCKET_NAME: sms-spam-artifacts-bucket
+  ENDPOINT_NAME: sms-ab-endpoint
 
 jobs:
-  build:
+  deploy:
+    name: Build, Test, Deploy
     runs-on: ubuntu-latest
 
     steps:
-    - name: 🔄 Checkout code
-      uses: actions/checkout@v3
+      - name: ✅ Checkout Code
+        uses: actions/checkout@v3
 
-    - name: 🐍 Set up Python 3.10
-      uses: actions/setup-python@v4
-      with:
-        python-version: 3.10
+      - name: 🧪 Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.9"
 
-    - name: 📦 Install dependencies
-      run: |
-        pip install -r requirements.txt || echo "No requirements.txt found"
-        pip install black flake8 pytest
+      - name: 📦 Install Dependencies
+        run: |
+          pip install -r requirements.txt
 
-    - name: 🎨 Lint Python code
-      run: |
-        flake8 scripts/ inference/ lambda/ --ignore=E501
-        black --check scripts/ inference/ lambda/
+      - name: 🧹 Lint Code
+        run: |
+          pip install black
+          black --check .
 
-    - name: 🧪 Run unit tests
-      run: |
-        pytest tests/ || echo "No tests directory yet"
+      - name: ✅ Run Preprocessing Test
+        run: |
+          python scripts/preprocess.py
 
-    - name: 🧱 Setup Terraform
-      uses: hashicorp/setup-terraform@v2
+      - name: ☁️ Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
 
-    - name: 🔍 Terraform Format Check
-      run: terraform fmt -check -recursive
+      - name: 🚀 Upload Preprocessed Artifacts to S3
+        run: |
+          aws s3 cp data/processed/X_train.npy s3://${{ env.BUCKET_NAME }}/processed/
+          aws s3 cp data/processed/y_train.npy s3://${{ env.BUCKET_NAME }}/processed/
+          aws s3 cp data/processed/X_test.npy s3://${{ env.BUCKET_NAME }}/processed/
+          aws s3 cp data/processed/y_test.npy s3://${{ env.BUCKET_NAME }}/processed/
+          aws s3 cp data/processed/tfidf_vectorizer.pkl s3://${{ env.BUCKET_NAME }}/processed/
 
-    - name: ✅ Terraform Validate
-      run: |
-        cd terraform
-        terraform init -backend=false
-        terraform validate
+      - name: 🔧 Terraform Init
+        working-directory: terraform
+        run: terraform init
+
+      - name: 📐 Terraform Apply
+        working-directory: terraform
+        run: |
+          terraform apply -auto-approve \
+            -var="model_a_name=sms-model-v1" \
+            -var="model_b_name=sms-model-v2" \
+            -var="bucket=${{ env.BUCKET_NAME }}"
+
+      - name: 🔔 Send Success Notification
+        if: success()
+        run: echo "🚀 CI/CD deployment completed successfully!"
+
+      - name: 🚨 Send Failure Notification
+        if: failure()
+        run: echo "❌ Deployment failed. Please check the logs."
